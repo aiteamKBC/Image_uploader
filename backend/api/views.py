@@ -55,6 +55,11 @@ def _create_image(request):
         return JsonResponse({"error": "A title is required."}, status=400)
     if upload is None:
         return JsonResponse({"error": "An image file is required."}, status=400)
+    if upload.size > settings.MAX_UPLOAD_SIZE:
+        limit_mb = settings.MAX_UPLOAD_SIZE // (1024 * 1024)
+        return JsonResponse(
+            {"error": f"Image is too large. The limit is {limit_mb} MB."}, status=413
+        )
 
     # Build a collision-proof storage path, keeping the original extension.
     extension = upload.name.rsplit(".", 1)[-1].lower() if "." in upload.name else "bin"

@@ -14,6 +14,7 @@ type Phase = 'idle' | 'uploading' | 'processing' | 'done' | 'error'
 type SelectedImage = { file: File; preview: string; key: string; title: string }
 
 const NEW_FOLDER = '__new__'
+const MAX_UPLOAD_BYTES = 200 * 1024 * 1024 // keep in sync with backend MAX_UPLOAD_SIZE
 
 function titleFromFilename(filename: string) {
   return filename.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim() || 'Untitled image'
@@ -56,8 +57,13 @@ export default function UploadPage() {
   }, [])
 
   function addFiles(files: File[]) {
-    const images = files.filter((file) => file.type.startsWith('image/'))
-    if (images.length !== files.length) {
+    const notImage = files.some((file) => !file.type.startsWith('image/'))
+    const images = files.filter((file) => file.type.startsWith('image/') && file.size <= MAX_UPLOAD_BYTES)
+    const tooLarge = files.some((file) => file.type.startsWith('image/') && file.size > MAX_UPLOAD_BYTES)
+
+    if (tooLarge) {
+      setError(`Some images are larger than ${MAX_UPLOAD_BYTES / (1024 * 1024)} MB and were ignored.`)
+    } else if (notImage) {
       setError('Only image files can be added. Other files were ignored.')
     } else {
       setError('')
@@ -235,7 +241,7 @@ export default function UploadPage() {
               <span className="dropzone-icon">⇧</span>
               <span><strong>Drag and drop images here</strong></span>
               <span>or click to browse</span>
-              <span className="hint">Select multiple PNG, JPG, GIF, or WebP files</span>
+              <span className="hint">Select multiple PNG, JPG, GIF, or WebP files (up to 200 MB each)</span>
             </span>
           </button>
           <input

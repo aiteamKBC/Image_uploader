@@ -136,6 +136,15 @@ STATIC_URL = 'static/'
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# --- Upload size limits ---
+# Raised from Django's 2.5 MB default so multi-hundred-MB images aren't
+# rejected before reaching the view. Keep FILE_UPLOAD_MAX_MEMORY_SIZE below
+# DATA_UPLOAD_MAX_MEMORY_SIZE so large files spill to a temp file on disk
+# instead of being held in memory.
+MAX_UPLOAD_SIZE = 200 * 1024 * 1024  # 200 MB, enforced in api/views.py
+DATA_UPLOAD_MAX_MEMORY_SIZE = MAX_UPLOAD_SIZE
+FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
+
 # --- CORS: allow the React (Vite) dev server to call this API ---
 CORS_ALLOWED_ORIGINS = [
     'http://localhost:5173',
