@@ -39,7 +39,7 @@ SECRET_KEY = 'django-insecure-ju432cqxp4!ub11#u@ylpifby9f+(hr&kupg-injl%x10r8g@z
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['image-uploader.kentbusinesscollege.net', 'localhost', '127.0.0.1']
 
 
 # Application definition
