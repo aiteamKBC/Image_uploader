@@ -1,0 +1,33 @@
+# ------------------------------------------------------------
+# Files/folders Docker should NOT send into the build context.
+# ------------------------------------------------------------
+
+# Python bytecode caches: built for your local Python
+__pycache__/
+*.pyc
+
+# Secrets: Supabase keys are injected at runtime via compose `env_file`.
+# settings.py's load_dotenv() simply does nothing when this file is missing.
+.env
+.env.*
+
+# Local SQLite DB: unused (all data lives in Supabase)
+db.sqlite3
+
+# Local virtual environments: the container installs its own packages
+venv/
+.venv/
+
+# Log files
+*.log
+
+# Editor settings
+.vscode
+.idea
+
+# Git history
+.git
+
+# The Docker files themselves aren't needed inside the image
+Dockerfile
+.dockerignore

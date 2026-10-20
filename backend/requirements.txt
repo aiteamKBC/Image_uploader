@@ -2,3 +2,6 @@ Django==6.0.6
 supabase==2.31.0
 python-dotenv==1.2.2
 django-cors-headers==4.9.0
+# Production WSGI server that replaces `manage.py runserver` inside Docker.
+# Note: it does not run on Windows, only inside the Linux container.
+gunicorn==23.0.0

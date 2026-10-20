@@ -1,0 +1,26 @@
+services:
+ frontend:
+  build:
+    context: ./frontend
+    dockerfile: Dockerfile
+  ports:
+    - "5173:5173"
+  networks:
+  - Image-uploader-network  
+  env_file:
+    - ./frontend/.env
+
+ backend:
+  build:
+    context: ./backend
+    dockerfile: Dockerfile
+  ports:
+    - "8000:8000"
+  networks:
+  - Image-uploader-network
+  env_file:
+    - ./backend/.env
+
+networks:
+  Image-uploader-network:
+    driver: bridge

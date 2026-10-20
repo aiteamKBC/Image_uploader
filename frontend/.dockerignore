@@ -1,0 +1,30 @@
+# ------------------------------------------------------------
+# Files/folders Docker should NOT send into the build context.
+# Smaller context = faster builds, smaller images, no leaked secrets.
+# ------------------------------------------------------------
+
+# Dependencies: reinstalled inside the container by `npm ci`.
+# Copying the Windows version would overwrite the Linux native binaries.
+node_modules
+
+# Build output: regenerated inside the container by `npm run build`
+dist
+
+# Secrets/env files: never bake these into an image.
+# VITE_API_URL is passed as a --build-arg instead.
+.env
+.env.*
+
+# Log files: useless inside the image
+*.log
+
+# Editor settings: only matter on your machine
+.vscode
+.idea
+
+# Git history: not needed to build or run the app
+.git
+
+# The Docker files themselves aren't needed inside the image
+Dockerfile
+.dockerignore
