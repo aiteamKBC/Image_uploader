@@ -23,9 +23,9 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
@@ -45,21 +45,17 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.14"
           cache: pip
           cache-dependency-path: backend/requirements.txt
-      - run: source venv/bin/activate   # activate the virtual environment
       - run: pip install -r requirements.txt
-      
       # Django's system checks (settings, models, urls)
       - run: python manage.py check
       - run: python manage.py test
-
-      - run: sudo systemctl restart image_uploader.service
 
   # ---------------- CD: build & push images ----------------
   docker:
@@ -74,7 +70,7 @@ jobs:
       matrix:
         service: [frontend, backend]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: docker/setup-buildx-action@v3
 
