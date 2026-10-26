@@ -11,6 +11,9 @@ import os
 
 from django.core.wsgi import get_wsgi_application
 
+from config.health import with_health_check
+
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 
-application = get_wsgi_application()
+# /health/ is answered before Django runs (see config/health.py)
+application = with_health_check(get_wsgi_application())

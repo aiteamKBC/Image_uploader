@@ -61,8 +61,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    # Must stay first: answers /health/ before the Host header is validated
-    'config.health.HealthCheckMiddleware',
+    # /health/ is answered in wsgi.py, before any middleware (see config/health.py)
     'django.middleware.security.SecurityMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
