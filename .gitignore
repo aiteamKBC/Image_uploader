@@ -1,2 +1,5 @@
 # Local frontend build output (deploys upload it; never commit it)
 dist-upload/
+loadtest.js
+*.json
+*.jpg

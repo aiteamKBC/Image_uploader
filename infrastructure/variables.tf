@@ -18,6 +18,12 @@ variable "certificate_arn" {
   default     = "arn:aws:acm:us-east-1:298490729551:certificate/039ab00b-eb26-4757-94fa-ccccc1e93afa"
 }
 
+variable "alarm_email" {
+  description = "Email that receives CloudWatch alarm notifications (empty = no email; AWS sends a confirmation link first)"
+  type        = string
+  default     = ""
+}
+
 variable "domain_name" {
   type    = string
   default = "image-uploader-aws.kentbusinesscollege.net"

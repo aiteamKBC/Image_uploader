@@ -41,8 +41,9 @@ EXPOSE 8023
 #   --workers 3             -> 3 processes handle requests in parallel
 #   --timeout 300           -> allow requests up to 5 minutes; the 30s default
 #                              would kill large (up to 200 MB) uploads mid-transfer
-CMD ["gunicorn", "config.wsgi:application", \
-     "--bind", "0.0.0.0:8023", \
-     "--workers", "3", \
-     "--timeout", "300"]
+#
+# Tracing (X-Ray): when OTEL_EXPORTER_OTLP_ENDPOINT is set (only in the ECS task
+# definition, where the ADOT collector sidecar listens), Gunicorn is started through
+# `opentelemetry-instrument`. Anywhere else (VPS, docker compose) it starts plainly.
+CMD ["sh", "-c", "exec ${OTEL_EXPORTER_OTLP_ENDPOINT:+opentelemetry-instrument} gunicorn config.wsgi:application --bind 0.0.0.0:8023 --workers 3 --timeout 300"]
 

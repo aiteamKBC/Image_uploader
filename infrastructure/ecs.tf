@@ -6,6 +6,7 @@ resource "aws_ecs_task_definition" "image_uploader_backend" {
   cpu                      = 1024     # 1 vCPU
   memory                   = 3072     # 3 GB
   execution_role_arn       = aws_iam_role.image_uploader_task_execution.arn
+  task_role_arn            = aws_iam_role.image_uploader_task.arn # X-Ray access (iam.tf)
 
   runtime_platform {
     operating_system_family = "LINUX"
@@ -27,7 +28,32 @@ resource "aws_ecs_task_definition" "image_uploader_backend" {
       { name = "SUPABASE_KEY", value = var.supabase_key },
       # Filled in automatically - no more copy-pasting the ALB address
       { name = "DJANGO_ALLOWED_HOSTS", value = aws_lb.image_uploader_alb.dns_name },
+
+      # Tracing: setting the OTLP endpoint makes the Dockerfile start Gunicorn through
+      # `opentelemetry-instrument`; spans go to the collector sidecar below, then X-Ray
+      { name = "OTEL_EXPORTER_OTLP_ENDPOINT", value = "http://127.0.0.1:4318" },
+      # Use the AWS distro's setup (X-Ray sampler etc.), not the plain OpenTelemetry one
+      { name = "OTEL_PYTHON_DISTRO", value = "aws_distro" },
+      { name = "OTEL_PYTHON_CONFIGURATOR", value = "aws_configurator" },
+      { name = "OTEL_EXPORTER_OTLP_PROTOCOL", value = "http/protobuf" },
+      { name = "OTEL_RESOURCE_ATTRIBUTES", value = "service.name=${local.xray_service_name}" },
+      # Sample with the X-Ray rules in observability.tf (fetched through the collector)
+      { name = "OTEL_TRACES_SAMPLER", value = "xray" },
+      { name = "OTEL_TRACES_SAMPLER_ARG", value = "endpoint=http://127.0.0.1:2000" },
+      { name = "OTEL_PROPAGATORS", value = "xray,tracecontext,baggage" },
+      { name = "OTEL_PYTHON_ID_GENERATOR", value = "xray" },
+      # Traces only: no custom metrics or logs (they would cost extra)
+      { name = "OTEL_METRICS_EXPORTER", value = "none" },
+      { name = "OTEL_LOGS_EXPORTER", value = "none" },
+      { name = "OTEL_AWS_APPLICATION_SIGNALS_ENABLED", value = "false" },
+      # Don't trace the ALB health checks (one every 30s per task)
+      { name = "OTEL_PYTHON_DJANGO_EXCLUDED_URLS", value = "health" },
+      # The Django instrumentation needs this before wsgi.py runs
+      { name = "DJANGO_SETTINGS_MODULE", value = "config.settings" },
     ]
+
+    # Start after the collector, so the first requests' traces aren't lost
+    dependsOn = [{ containerName = "aws-otel-collector", condition = "START" }]
 
     logConfiguration = {
       logDriver = "awslogs"
@@ -37,6 +63,27 @@ resource "aws_ecs_task_definition" "image_uploader_backend" {
         awslogs-stream-prefix = "ecs"
       }
     }
+    },
+    # Sidecar: AWS Distro for OpenTelemetry collector. Receives the app's spans on
+    # localhost and sends them to X-Ray. Not essential: if it crashes, the app keeps
+    # serving (only tracing stops).
+    {
+      name      = "aws-otel-collector"
+      image     = "public.ecr.aws/aws-observability/aws-otel-collector:v0.50.0"
+      essential = false
+
+      environment = [
+        { name = "AOT_CONFIG_CONTENT", value = local.otel_collector_config },
+      ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.image_uploader_backend.name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "otel"
+        }
+      }
   }])
 }
 

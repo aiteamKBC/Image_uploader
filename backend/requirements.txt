@@ -5,3 +5,6 @@ django-cors-headers==4.9.0
 # Production WSGI server that replaces `manage.py runserver` inside Docker.
 # Note: it does not run on Windows, only inside the Linux container.
 gunicorn==23.0.0
+# AWS Distro for OpenTelemetry: traces every request (Django) and every Supabase
+# call (httpx) and sends them to X-Ray. Only switched on in AWS, see the Dockerfile.
+aws-opentelemetry-distro==0.21.0
