@@ -1,8 +1,10 @@
 # ------------------------------------------------------------
-# CI/CD pipeline
-#   CI: on every push / pull request -> lint, build, check, test
-#   CD: on push to main (after CI passes) -> build Docker images
-#       and push them to GitHub Container Registry (ghcr.io)
+# CI/CD pipeline (AWS)
+#   Pull request -> test only what changed
+#   Push to main -> test, then deploy only what changed:
+#     backend/  -> build image, push to ECR, redeploy the ECS service
+#     frontend/ -> build site, upload to S3, clear the CloudFront cache
+# Infrastructure itself is managed with Terraform (infrastructure/).
 # ------------------------------------------------------------
 name: CI/CD
 
@@ -11,13 +13,42 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  # Adds a "Run workflow" button in the Actions tab for manual runs
+  # "Run workflow" button in the Actions tab: tests and deploys both parts
   workflow_dispatch:
 
+env:
+  AWS_REGION: eu-north-1
+  ECR_REPOSITORY: image_uploader
+  ECS_CLUSTER: image-uploader-cluster
+  ECS_SERVICE: iu-backend
+  S3_BUCKET: kbc-image-uploader-frontend
+  CLOUDFRONT_DISTRIBUTION_ID: E1J5QB1GNG15KZ
+
 jobs:
+  # ---------------- Which parts changed? ----------------
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.backend == 'true' }}
+      frontend: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.frontend == 'true' }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: filter
+        if: github.event_name != 'workflow_dispatch'
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+            frontend:
+              - 'frontend/**'
+
   # ---------------- CI: frontend ----------------
   frontend:
     name: Frontend - lint & build
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -40,6 +71,8 @@ jobs:
   # ---------------- CI: backend ----------------
   backend:
     name: Backend - check & test
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -57,106 +90,97 @@ jobs:
       - run: python manage.py check
       - run: python manage.py test
 
-  # ---------------- CD: build & push images ----------------
-  docker:
-    name: Build & push ${{ matrix.service }} image
-    # Only after both CI jobs pass
-    needs: [frontend, backend]
+  # ---------------- CD: backend -> ECR -> ECS ----------------
+  deploy-backend:
+    name: Deploy backend (ECR + ECS)
+    needs: backend
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write   # needed to push to ghcr.io with GITHUB_TOKEN
-    strategy:
-      matrix:
-        service: [frontend, backend]
+    # One backend deploy at a time; a newer push waits for the current one
+    concurrency:
+      group: deploy-backend
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v5
 
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
       - uses: docker/setup-buildx-action@v3
 
-      # Log in to GHCR only when we will actually push (not on PRs)
-      - if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Image name must be lowercase: ghcr.io/aiteamkbc/image_uploader-backend
-      # Tags: "latest" + the short commit SHA (so you can roll back to any commit)
-      - id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}-${{ matrix.service }}
-          tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,prefix=
-
-      # On PRs: build only (proves the Dockerfile still works). On main: build + push.
+      # Tags: "latest" (what the ECS task definition runs) + the commit SHA
+      # (so any earlier version can be found and redeployed)
       - uses: docker/build-push-action@v6
         with:
-          context: ./${{ matrix.service }}
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.service }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          context: ./backend
+          push: true
+          provenance: false # push a plain image, no extra attestation manifests
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
 
-  # ---------------- CD: deploy to the server ----------------
-  # The server runs the app WITHOUT Docker: a git clone in /var/www/Image_uploader,
-  # the backend in a venv under systemd (image_uploader.service), and the
-  # frontend as a static build in frontend/dist.
-  deploy:
-    name: Deploy to server
-    # Only after CI passes, and only for real updates to main (never pull requests)
-    needs: [frontend, backend]
+      # Start new tasks with the new :latest image; ECS swaps them in once
+      # /health/ passes (and rolls back automatically if it never does)
+      - name: Redeploy ECS service
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_SERVICE" \
+            --force-new-deployment \
+            --query 'service.deployments[0].id' --output text
+
+      - name: Wait until the new version is live
+        run: aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE"
+
+  # ---------------- CD: frontend -> S3 -> CloudFront ----------------
+  deploy-frontend:
+    name: Deploy frontend (S3 + CloudFront)
+    needs: frontend
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    # Never run two deploys at the same time; a newer push waits for the current one
     concurrency:
-      group: deploy-production
+      group: deploy-frontend
       cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: frontend
     steps:
-      - uses: appleboy/ssh-action@v1
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
         with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          port: ${{ secrets.SERVER_PORT || 22 }}
-          command_timeout: 15m
-          script: |
-            set -e   # stop at the first failing command
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
-            cd /var/www/Image_uploader
+      - run: npm ci
 
-            # 1. Get exactly the commit that passed CI.
-            #    reset --hard discards edits to tracked files on the server;
-            #    untracked files (.env, venv, node_modules, dist) are kept.
-            git fetch origin main
-            git reset --hard ${{ github.sha }}
+      # Empty on purpose: the site calls /api/... on its own domain and
+      # CloudFront forwards /api/* to the load balancer
+      - run: npm run build
+        env:
+          VITE_API_URL: ""
 
-            # 2. Backend: install new/changed packages and apply migrations
-            cd backend
-            ./venv/bin/pip install -q -r requirements.txt
-            ./venv/bin/python manage.py migrate --noinput
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-            # 3. Frontend: rebuild the static files (reads frontend/.env at build time).
-            #    Build into dist-new first and swap it in only on success, so the live
-            #    site never serves a half-written dist (and a failed build changes nothing).
-            cd ../frontend
-            npm ci --no-audit --no-fund
-            rm -rf dist-new
-            npm run build -- --outDir dist-new --emptyOutDir
-            rm -rf dist-old
-            [ -d dist ] && mv dist dist-old
-            mv dist-new dist
-            rm -rf dist-old
+      # Upload the new build and delete files that are no longer part of it
+      - run: aws s3 sync ./dist "s3://$S3_BUCKET" --delete
 
-            # 4. Restart the backend and make sure it came back up
-            systemctl restart image_uploader
-            sleep 3
-            systemctl is-active --quiet image_uploader || {
-              journalctl -u image_uploader -n 30 --no-pager
-              exit 1
-            }
-            echo "Deployed ${{ github.sha }}"
+      # Make CloudFront fetch the new files instead of serving cached ones
+      - run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" \
+            --paths "/*" \
+            --query 'Invalidation.Id' --output text

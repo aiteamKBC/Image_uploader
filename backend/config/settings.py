@@ -39,7 +39,12 @@ SECRET_KEY = 'django-insecure-ju432cqxp4!ub11#u@ylpifby9f+(hr&kupg-injl%x10r8g@z
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['image-uploader.kentbusinesscollege.net', 'localhost', '127.0.0.1']
+# Comma-separated list, e.g. "my-alb-123.eu-north-1.elb.amazonaws.com,example.com".
+# Set DJANGO_ALLOWED_HOSTS in the environment (ECS task definition) to override.
+ALLOWED_HOSTS = os.environ.get(
+    'DJANGO_ALLOWED_HOSTS',
+    'image-uploader.kentbusinesscollege.net,localhost,127.0.0.1',
+).split(',')
 
 
 # Application definition
@@ -56,6 +61,8 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    # Must stay first: answers /health/ before the Host header is validated
+    'config.health.HealthCheckMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -146,10 +153,12 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = MAX_UPLOAD_SIZE
 FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
 
 # --- CORS: allow the React (Vite) dev server to call this API ---
-CORS_ALLOWED_ORIGINS = [
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-]
+# Comma-separated list; set CORS_ALLOWED_ORIGINS in the environment to add the
+# deployed frontend, e.g. "https://d1234abcd.cloudfront.net".
+CORS_ALLOWED_ORIGINS = os.environ.get(
+    'CORS_ALLOWED_ORIGINS',
+    'http://localhost:5173,http://127.0.0.1:5173',
+).split(',')
 # The React app sends only a title + image file (no cookies/auth), so
 # credentials are not needed. Keep this False in development.
 CORS_ALLOW_CREDENTIALS = False

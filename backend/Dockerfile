@@ -25,3 +25,24 @@ RUN pip install -r requirements.txt
 # Now copy the rest of the backend code (filtered by .dockerignore)
 COPY . .
 
+# Create an unprivileged user so the app doesn't run as root.
+# If the app is ever exploited, the attacker has limited permissions.
+RUN useradd --create-home appuser
+
+# Switch to that user for everything below, including the running app
+USER appuser
+
+# The app listens on port 8023 (use this as the ECS "Container port")
+EXPOSE 8023
+
+# Start Gunicorn:
+#   config.wsgi:application -> the WSGI entry point in backend/config/wsgi.py
+#   --bind 0.0.0.0:8023     -> listen on all interfaces so traffic from outside the container reaches it
+#   --workers 3             -> 3 processes handle requests in parallel
+#   --timeout 300           -> allow requests up to 5 minutes; the 30s default
+#                              would kill large (up to 200 MB) uploads mid-transfer
+CMD ["gunicorn", "config.wsgi:application", \
+     "--bind", "0.0.0.0:8023", \
+     "--workers", "3", \
+     "--timeout", "300"]
+
